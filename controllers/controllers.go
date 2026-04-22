@@ -44,6 +44,11 @@ func VerifyPassword(userPassword string, givenPassword string) (bool, string) {
 
 }
 
+func wrapUser(user models.User) models.User {
+	user.Password = nil
+	return user
+}
+
 func Signup() gin.HandlerFunc {
 
 	return func(c *gin.Context) {
@@ -52,12 +57,14 @@ func Signup() gin.HandlerFunc {
 
 		var user models.User
 		if err := c.BindJSON(&user); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Failed1", "error": err.Error()})
 			return
 		}
 		validationErr := Validate.Struct(user)
 		if validationErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr})
+			log.Println(validationErr)
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Failed", "error": validationErr.Error()})
+			return
 		}
 		count, err := UserCollection.CountDocuments(ctx, bson.M{"email": user.Email})
 		if err != nil {
@@ -68,6 +75,7 @@ func Signup() gin.HandlerFunc {
 
 		if count > 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "user already exists"})
+			return
 		}
 
 		count, err = UserCollection.CountDocuments(ctx, bson.M{"phone": user.Phone})
@@ -76,7 +84,7 @@ func Signup() gin.HandlerFunc {
 
 		if err != nil {
 			log.Panic(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -91,7 +99,7 @@ func Signup() gin.HandlerFunc {
 		user.Updated_At, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
 		user.ID = primitive.NewObjectID()
 		user.User_ID = user.ID.Hex()
-		token, refreshToken, _ := generate.TokenGenerator(*user.Email, *user.First_Name, *user.Last_Name, *user.Phone, *&user.User_ID)
+		token, refreshToken, _ := generate.TokenGenerator(*user.Email, *user.First_Name, *user.Last_Name, *user.Phone, user.User_ID)
 
 		user.Token = &token
 		user.Refresh_Token = &refreshToken
@@ -106,7 +114,7 @@ func Signup() gin.HandlerFunc {
 		}
 		defer cancel()
 
-		c.JSON(http.StatusCreated, gin.H{"success": true, "message": "User created successfully", "user": user})
+		c.JSON(http.StatusCreated, gin.H{"success": true, "message": "User created successfully", "user": wrapUser(user)})
 	}
 }
 
@@ -118,7 +126,7 @@ func Login() gin.HandlerFunc {
 		var user models.User
 		var founduser models.User
 		if err := c.BindJSON(&user); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err})
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -138,17 +146,35 @@ func Login() gin.HandlerFunc {
 			return
 		}
 
-		token, refreshToken, _ := generate.TokenGenerator(*founduser.Email, *founduser.First_Name, *founduser.Last_Name, *founduser.Phone, *&founduser.User_ID)
+		token, refreshToken, _ := generate.TokenGenerator(*founduser.Email, *founduser.First_Name, *founduser.Last_Name, *founduser.Phone, founduser.User_ID)
 		defer cancel()
 
 		generate.UpdateAllTokens(token, refreshToken, founduser.User_ID)
 
-		c.JSON(http.StatusFound, founduser)
+		c.JSON(http.StatusFound, wrapUser(founduser))
 	}
 }
 
 func ProducytViewerAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		var products models.Product
+
+		defer cancel()
+		if err := c.BindJSON(&products); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		products.Product_ID = primitive.NewObjectID()
+
+		_, inserterr := ProductCollection.InsertOne(ctx, products)
+		if inserterr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Product not created"})
+			return
+		}
+		defer cancel()
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "Product added successfully"})
 	}
 }
 

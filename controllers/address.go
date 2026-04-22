@@ -16,7 +16,7 @@ import (
 func AddAddress() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		user_id := c.Query("id")
+		user_id := c.Param("id")
 		if user_id == "" {
 			c.Header("Content-Type", "application/json")
 			c.JSON(http.StatusNotFound, gin.H{"error": "User ID is required"})
@@ -39,6 +39,7 @@ func AddAddress() gin.HandlerFunc {
 		}
 
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
 
 		match_filter := bson.D{{Key: "$match", Value: bson.D{primitive.E{Key: "_id", Value: address}}}}
 		unwind := bson.D{{Key: "$unwind", Value: bson.D{primitive.E{Key: "path", Value: "$address"}}}}
@@ -47,11 +48,14 @@ func AddAddress() gin.HandlerFunc {
 		pointcursor, err := UserCollection.Aggregate(ctx, mongo.Pipeline{match_filter, unwind, group})
 		if err != nil {
 			c.IndentedJSON(500, "Internal Server Error")
+			return
 		}
 
 		var addressinfo []bson.M
 		if err = pointcursor.All(ctx, &addressinfo); err != nil {
-			panic(err)
+
+			c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
 
 		var size int32
@@ -66,12 +70,14 @@ func AddAddress() gin.HandlerFunc {
 			_, err = UserCollection.UpdateOne(ctx, filter, update)
 			if err != nil {
 				fmt.Println(err)
+				return
 			}
 		} else {
 			c.IndentedJSON(400, " Not Allowed to add more than 2 addresses")
 		}
 		defer cancel()
 		ctx.Done()
+		c.IndentedJSON(http.StatusOK, gin.H{"message": "Successfully added address", "address": addresses})
 	}
 }
 
@@ -154,7 +160,7 @@ func EditWorkAddress() gin.HandlerFunc {
 
 func DeleteAddress() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user_id := c.Query("id")
+		user_id := c.Param("id")
 		if user_id == "" {
 			c.Header("Content-Type", "application/json")
 

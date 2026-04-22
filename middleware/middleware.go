@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 
 	token "github.com/falola13/go-ecommerce/tokens"
 	"github.com/gin-gonic/gin"
@@ -9,15 +10,24 @@ import (
 
 func Authentication() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ClientToken := c.Request.Header.Get("token")
+		ClientToken := c.GetHeader("Authorization")
+		if ClientToken != "" {
+			const bearerPrefix = "Bearer "
+			if strings.HasPrefix(ClientToken, bearerPrefix) {
+				ClientToken = strings.TrimSpace(strings.TrimPrefix(ClientToken, bearerPrefix))
+			}
+		}
 		if ClientToken == "" {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "No authorization header provided"})
+			ClientToken = c.GetHeader("token")
+		}
+		if ClientToken == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "No authorization header provided"})
 			c.Abort()
 			return
 		}
 		claims, err := token.ValidateToken(ClientToken)
 		if err != "" {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err})
 			c.Abort()
 			return
 		}
